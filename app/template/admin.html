@@ -781,21 +781,6 @@
             </div>
           </div>
 
-          <!-- Cloudflare 设置 -->
-          <div class="rounded-lg border border-border bg-background p-6">
-            <h3 class="text-sm font-semibold mb-4">Cloudflare 设置</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="cfg-label">
-                  CF Clearance
-                  <span class="help-icon"
-                    title="Cloudflare验证cookie的值部分，用于绕过Cloudflare人机验证。只需输入cf_clearance=后面的值。">?</span>
-                </label>
-                <input id="cfgCfClearance" class="cfg-input" placeholder="">
-              </div>
-            </div>
-          </div>
-
           <!-- 超时设置 -->
           <div class="rounded-lg border border-border bg-background p-6">
             <h3 class="text-sm font-semibold mb-4">超时设置</h3>
@@ -846,8 +831,6 @@
               https://yourdomain.com），若您不使用视频功能且图片使用Base64模式则可留空</div>
             <div><span class="font-medium">代理设置：</span>服务代理用于访问Grok
               API和上传图片；缓存代理专门用于下载图片和视频缓存。若仅设置服务代理，缓存将使用相同的代理；若都设置，则分别使用不同的代理</div>
-            <div><span class="font-medium">请求 403：</span>通常是被 CF 拦截了，可采用以下办法之一：1. 更换服务器IP ｜ 2. 配置代理IP ｜ 3.在服务器中访问
-              grok.com 通过 CF 验证后 F12 获取 cf_clearance</div>
           </div>
         </div>
       </div>
@@ -1308,6 +1291,12 @@
     };
 
     // --- 日志审计 ---
+    const formatLogTime = (timestamp) => {
+      if (!timestamp) return '-';
+      const date = new Date(timestamp);
+      const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+      return beijingTime.toISOString().replace('T', ' ').slice(0, 19);
+    };
 
     const loadLogs = async () => {
       try {
@@ -1346,7 +1335,7 @@
         tr.className = 'border-b border-border hover:bg-muted/50 transition-colors';
         const statusClass = l.status === 200 ? 'text-green-600' : 'text-red-600';
         tr.innerHTML = `
-                  <td class="p-4 align-middle text-muted-foreground whitespace-nowrap">${l.time}</td>
+                  <td class="p-4 align-middle text-muted-foreground whitespace-nowrap">${formatLogTime(l.timestamp)}</td>
                   <td class="p-4 align-middle font-medium">${l.key_name}</td>
                   <td class="p-4 align-middle text-xs">${l.model}</td>
                   <td class="p-4 align-middle text-xs text-muted-foreground">${l.ip}</td>
@@ -1597,7 +1586,7 @@
         }
       } catch (e) { console.error('加载统计失败:', e); showToast('加载统计失败', 'error') }
     };
-    const loadSettings = async () => { try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (d.success) { const g = d.data.global, k = d.data.grok; const cfClearance = k.cf_clearance || ''; const cleanCfDisplay = cfClearance.startsWith('cf_clearance=') ? cfClearance.split('cf_clearance=')[1] : cfClearance; $('cfgAdminUser').value = g.admin_username || ''; $('cfgAdminPass').value = ''; $('cfgLogLevel').value = g.log_level || 'DEBUG'; $('cfgImageCacheMaxSize').value = g.image_cache_max_size_mb || 500; $('cfgVideoCacheMaxSize').value = g.video_cache_max_size_mb || 1000; $('cfgImageMode').value = g.image_mode || 'url'; $('cfgBaseUrl').value = g.base_url || ''; $('cfgApiKey').value = k.api_key || ''; $('cfgCfClearance').value = cleanCfDisplay; $('cfgStatsigId').value = k.x_statsig_id || ''; $('cfgDynamicStatsig').checked = k.dynamic_statsig !== false; updateStatsigIdState(); $('cfgFilteredTags').value = k.filtered_tags || ''; $('cfgShowThinking').value = k.show_thinking !== false ? 'true' : 'false'; $('cfgTemporary').value = k.temporary !== false ? 'true' : 'false'; $('cfgStreamChunkTimeout').value = k.stream_chunk_timeout || 120; $('cfgStreamFirstResponseTimeout').value = k.stream_first_response_timeout || 30; $('cfgStreamTotalTimeout').value = k.stream_total_timeout || 600; $('cfgRetryStatusCodes').value = (k.retry_status_codes || [401, 429]).join(','); await loadCacheSize() } } catch (e) { console.error('加载配置失败:', e); showToast('加载配置失败', 'error') } };
+    const loadSettings = async () => { try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (d.success) { const g = d.data.global, k = d.data.grok; $('cfgAdminUser').value = g.admin_username || ''; $('cfgAdminPass').value = ''; $('cfgLogLevel').value = g.log_level || 'DEBUG'; $('cfgImageCacheMaxSize').value = g.image_cache_max_size_mb || 500; $('cfgVideoCacheMaxSize').value = g.video_cache_max_size_mb || 1000; $('cfgImageMode').value = g.image_mode || 'url'; $('cfgBaseUrl').value = g.base_url || ''; $('cfgApiKey').value = k.api_key || ''; $('cfgStatsigId').value = k.x_statsig_id || ''; $('cfgDynamicStatsig').checked = k.dynamic_statsig !== false; updateStatsigIdState(); $('cfgFilteredTags').value = k.filtered_tags || ''; $('cfgShowThinking').value = k.show_thinking !== false ? 'true' : 'false'; $('cfgTemporary').value = k.temporary !== false ? 'true' : 'false'; $('cfgStreamChunkTimeout').value = k.stream_chunk_timeout || 120; $('cfgStreamFirstResponseTimeout').value = k.stream_first_response_timeout || 30; $('cfgStreamTotalTimeout').value = k.stream_total_timeout || 600; $('cfgRetryStatusCodes').value = (k.retry_status_codes || [401, 429]).join(','); await loadCacheSize() } } catch (e) { console.error('加载配置失败:', e); showToast('加载配置失败', 'error') } };
     const loadCacheSize = async () => { try { const r = await apiRequest('/api/cache/size'); if (!r) return; const d = await r.json(); if (d.success) { ['image', 'video', 'total'].forEach(t => $(`${t}CacheSize`).value = d.data[`${t}_size`] || '0 MB') } } catch (e) { console.error('加载缓存大小失败:', e);['image', 'video', 'total'].forEach(t => $(`${t}CacheSize`).value = '0 MB') } };
     const clearCacheByType = async (type, url, msg) => { if (!confirm(msg)) return; try { const r = await apiRequest(url, { method: 'POST' }); if (!r) return; const d = await r.json(); d.success ? (showToast(`${type}缓存清理完成，已删除 ${d.data.deleted_count || 0} 个文件`, 'success'), await loadCacheSize(), await loadCachePreview(true)) : showToast('清理失败: ' + (d.error || '未知错误'), 'error') } catch (e) { showToast('清理失败: ' + e.message, 'error') } };
     const clearImageCache = () => clearCacheByType('图片', '/api/cache/clear/images', '确定要清理图片缓存吗？此操作将删除所有图片缓存文件！');
@@ -1743,7 +1732,7 @@
     const refreshCachePreview = () => loadCachePreview(true);
     const loadMoreCachePreview = () => loadCachePreview(false);
     const saveGlobalSettings = async () => { const gc = { admin_username: $('cfgAdminUser').value, log_level: $('cfgLogLevel').value, image_cache_max_size_mb: parseInt($('cfgImageCacheMaxSize').value) || 500, video_cache_max_size_mb: parseInt($('cfgVideoCacheMaxSize').value) || 1000, image_mode: $('cfgImageMode').value, base_url: $('cfgBaseUrl').value }; if ($('cfgAdminPass').value) gc.admin_password = $('cfgAdminPass').value; try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (!d.success) return showToast('加载配置失败', 'error'); const s = await apiRequest('/api/settings', { method: 'POST', body: JSON.stringify({ global_config: gc, grok_config: d.data.grok }) }); if (!s) return; const sd = await s.json(); sd.success ? (showToast('全局配置保存成功', 'success'), $('cfgAdminPass').value = '') : showToast('保存失败: ' + (sd.error || '未知错误'), 'error') } catch (e) { showToast('保存失败: ' + e.message, 'error') } };
-    const saveGrokSettings = async () => { const cf = $('cfgCfClearance').value.trim(); const cleanCf = cf.startsWith('cf_clearance=') ? cf.split('cf_clearance=')[1] : cf; const retryCodesStr = $('cfgRetryStatusCodes').value.trim(); const retryCodes = retryCodesStr ? retryCodesStr.split(',').map(c => parseInt(c.trim())).filter(c => !isNaN(c)) : [401, 429]; const kc = { api_key: $('cfgApiKey').value, cf_clearance: cleanCf, x_statsig_id: $('cfgStatsigId').value, dynamic_statsig: $('cfgDynamicStatsig').checked, filtered_tags: $('cfgFilteredTags').value, show_thinking: $('cfgShowThinking').value === 'true', temporary: $('cfgTemporary').value === 'true', stream_chunk_timeout: parseInt($('cfgStreamChunkTimeout').value) || 120, stream_first_response_timeout: parseInt($('cfgStreamFirstResponseTimeout').value) || 30, stream_total_timeout: parseInt($('cfgStreamTotalTimeout').value) || 600, retry_status_codes: retryCodes }; try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (!d.success) return showToast('加载配置失败', 'error'); const s = await apiRequest('/api/settings', { method: 'POST', body: JSON.stringify({ global_config: d.data.global, grok_config: kc }) }); if (!s) return; const sd = await s.json(); sd.success ? showToast('Grok配置保存成功', 'success') : showToast('保存失败: ' + (sd.error || '未知错误'), 'error') } catch (e) { showToast('保存失败: ' + e.message, 'error') } };
+    const saveGrokSettings = async () => { const retryCodesStr = $('cfgRetryStatusCodes').value.trim(); const retryCodes = retryCodesStr ? retryCodesStr.split(',').map(c => parseInt(c.trim())).filter(c => !isNaN(c)) : [401, 429]; const kc = { api_key: $('cfgApiKey').value, x_statsig_id: $('cfgStatsigId').value, dynamic_statsig: $('cfgDynamicStatsig').checked, filtered_tags: $('cfgFilteredTags').value, show_thinking: $('cfgShowThinking').value === 'true', temporary: $('cfgTemporary').value === 'true', stream_chunk_timeout: parseInt($('cfgStreamChunkTimeout').value) || 120, stream_first_response_timeout: parseInt($('cfgStreamFirstResponseTimeout').value) || 30, stream_total_timeout: parseInt($('cfgStreamTotalTimeout').value) || 600, retry_status_codes: retryCodes }; try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (!d.success) return showToast('加载配置失败', 'error'); const s = await apiRequest('/api/settings', { method: 'POST', body: JSON.stringify({ global_config: d.data.global, grok_config: kc }) }); if (!s) return; const sd = await s.json(); sd.success ? showToast('Grok配置保存成功', 'success') : showToast('保存失败: ' + (sd.error || '未知错误'), 'error') } catch (e) { showToast('保存失败: ' + e.message, 'error') } };
     window.addEventListener('DOMContentLoaded', () => { refreshTokens(); initCacheViewer(); setInterval(() => { loadStats(); updateRemaining() }, 30000); $('cfgDynamicStatsig').addEventListener('change', updateStatsigIdState) });
   </script>
 </body>
