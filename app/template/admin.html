@@ -292,20 +292,12 @@
           </div>
 
           <div class="flex items-center gap-2">
-            <button onclick="refreshTokens()" class="btn-icon" title="刷新列表">
+            <button onclick="refreshAllTokens()" class="btn-icon" title="刷新Token剩余次数">
               <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2">
                 <polyline points="23 4 23 10 17 10" />
                 <polyline points="1 20 1 14 7 14" />
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-              </svg>
-            </button>
-            <button onclick="refreshAllTokens()" class="btn-icon" title="刷新所有Token剩余次数">
-              <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="2">
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-                <text x="12" y="16" font-size="8" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">#</text>
               </svg>
             </button>
             <div id="batchActions" class="hidden items-center gap-2">
