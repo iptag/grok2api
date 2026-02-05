@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireAdminAuth } from "../auth";
 import { getSettings, saveSettings, normalizeCfCookie } from "../settings";
+import { ensureTosAndNsfw } from "../grok/accountSettings";
 import {
   addApiKey,
   batchAddApiKeys,
@@ -34,8 +35,94 @@ import {
   type CacheType,
 } from "../repo/cache";
 
+import { dbFirst } from "../db";
+import { nowMs } from "../utils/time";
+
 function jsonError(message: string, code: string): Record<string, unknown> {
   return { error: message, code };
+}
+
+const LEGACY_TOS_NSFW_KEY = "legacy_accounts_tos_nsfw_v1";
+
+async function runTosNsfwFixForTokens(env: Env, rawTokens: string[], concurrency: number): Promise<{ ok: number; failed: number }> {
+  const tokens = Array.from(
+    new Set(
+      rawTokens
+        .map((t) => String(t ?? "").trim())
+        .filter(Boolean)
+        .map((t) => (t.startsWith("sso=") ? t.slice(4).trim() : t)),
+    ),
+  );
+  if (!tokens.length) return { ok: 0, failed: 0 };
+
+  const settings = await getSettings(env);
+  const cf = String(settings.grok.cf_clearance ?? "").trim();
+  const limit = Math.max(1, Math.min(10, Math.floor(concurrency || 10)));
+
+  let ok = 0;
+  let failed = 0;
+  let i = 0;
+
+  const worker = async () => {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const idx = i++;
+      if (idx >= tokens.length) return;
+      const token = tokens[idx]!;
+      const res = await ensureTosAndNsfw({ token, cf_clearance: cf });
+      if (res.ok) ok += 1;
+      else {
+        failed += 1;
+        console.warn(`[legacy-fix] token=${token.slice(0, 8)}… failed: ${res.error || "unknown"}`);
+      }
+      // Be nice to the upstream endpoints.
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return { ok, failed };
+}
+
+async function maybeStartLegacyTosNsfwFix(env: Env, ctx: ExecutionContext): Promise<void> {
+  const now = nowMs();
+  const row = await dbFirst<{ value: string; updated_at: number }>(env.DB, "SELECT value, updated_at FROM settings WHERE key = ?", [
+    LEGACY_TOS_NSFW_KEY,
+  ]);
+  if (row?.value?.startsWith("done:")) return;
+
+  const staleAfterMs = 60 * 60 * 1000;
+  if (row?.value === "running" && now - (row.updated_at ?? 0) < staleAfterMs) return;
+
+  if (!row) {
+    const res = await env.DB.prepare("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)")
+      .bind(LEGACY_TOS_NSFW_KEY, "running", now)
+      .run();
+    if ((res.meta?.changes ?? 0) === 0) return;
+  } else {
+    const res = await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND updated_at = ?")
+      .bind("running", now, LEGACY_TOS_NSFW_KEY, row.updated_at)
+      .run();
+    if ((res.meta?.changes ?? 0) === 0) return;
+  }
+
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const tokens = (await listTokens(env.DB)).map((t) => t.token);
+        const result = await runTosNsfwFixForTokens(env, tokens, 10);
+        const doneValue = `done:${result.ok}/${tokens.length} failed:${result.failed}`;
+        await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ?")
+          .bind(doneValue, nowMs(), LEGACY_TOS_NSFW_KEY)
+          .run();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ?")
+          .bind(`error:${msg.slice(0, 180)}`, nowMs(), LEGACY_TOS_NSFW_KEY)
+          .run();
+      }
+    })(),
+  );
 }
 
 function parseBearer(auth: string | null): string | null {
@@ -128,6 +215,8 @@ adminRoutes.get("/api/storage/mode", requireAdminAuth, async (c) => {
 
 adminRoutes.get("/api/tokens", requireAdminAuth, async (c) => {
   try {
+    // 后台自动为现有 token 执行 TOS/NSFW 修复（仅执行一次）
+    if (c.executionCtx) await maybeStartLegacyTosNsfwFix(c.env, c.executionCtx);
     const rows = await listTokens(c.env.DB);
     const infos = rows.map(tokenRowToInfo);
     return c.json({ success: true, data: infos, total: infos.length });
@@ -142,6 +231,10 @@ adminRoutes.post("/api/tokens/add", requireAdminAuth, async (c) => {
     const token_type = validateTokenType(String(body.token_type ?? ""));
     const tokens = Array.isArray(body.tokens) ? body.tokens : [];
     const count = await addTokens(c.env.DB, tokens, token_type);
+    // 为新添加的 token 自动执行 TOS/NSFW 修复
+    if (tokens.length && c.executionCtx) {
+      c.executionCtx.waitUntil(runTosNsfwFixForTokens(c.env, tokens, 5));
+    }
     return c.json({ success: true, message: `添加成功(${count})` });
   } catch (e) {
     return c.json(jsonError(`添加失败: ${e instanceof Error ? e.message : String(e)}`, "TOKENS_ADD_ERROR"), 500);
@@ -253,6 +346,53 @@ adminRoutes.post("/api/tokens/refresh", requireAdminAuth, async (c) => {
     });
   } catch (e) {
     return c.json(jsonError(`测试失败: ${e instanceof Error ? e.message : String(e)}`, "TEST_TOKEN_ERROR"), 500);
+  }
+});
+
+// 手动触发 TOS/NSFW 修复
+adminRoutes.post("/api/tokens/fix-tos-nsfw", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as { tokens?: string[] };
+    const tokens = Array.isArray(body.tokens) ? body.tokens : [];
+    if (!tokens.length) {
+      // 如果没有指定 tokens，修复所有 token
+      const rows = await listTokens(c.env.DB);
+      const allTokens = rows.map((r) => r.token);
+      const result = await runTosNsfwFixForTokens(c.env, allTokens, 10);
+      return c.json({
+        success: true,
+        message: `TOS/NSFW 修复完成: ${result.ok} 成功, ${result.failed} 失败`,
+        data: result,
+      });
+    }
+    const result = await runTosNsfwFixForTokens(c.env, tokens, 5);
+    return c.json({
+      success: true,
+      message: `TOS/NSFW 修复完成: ${result.ok} 成功, ${result.failed} 失败`,
+      data: result,
+    });
+  } catch (e) {
+    return c.json(jsonError(`修复失败: ${e instanceof Error ? e.message : String(e)}`, "FIX_TOS_NSFW_ERROR"), 500);
+  }
+});
+
+// 获取 TOS/NSFW 修复状态
+adminRoutes.get("/api/tokens/fix-tos-nsfw/status", requireAdminAuth, async (c) => {
+  try {
+    const row = await dbFirst<{ value: string; updated_at: number }>(c.env.DB, "SELECT value, updated_at FROM settings WHERE key = ?", [
+      LEGACY_TOS_NSFW_KEY,
+    ]);
+    if (!row) return c.json({ success: true, data: { status: "not_started" } });
+    return c.json({
+      success: true,
+      data: {
+        status: row.value.startsWith("done:") ? "done" : row.value === "running" ? "running" : row.value.startsWith("error:") ? "error" : "unknown",
+        detail: row.value,
+        updated_at: row.updated_at,
+      },
+    });
+  } catch (e) {
+    return c.json(jsonError(`获取失败: ${e instanceof Error ? e.message : String(e)}`, "GET_FIX_STATUS_ERROR"), 500);
   }
 });
 

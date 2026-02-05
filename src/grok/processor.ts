@@ -454,13 +454,21 @@ export async function parseOpenAiFromGrokNdjson(
     if (typeof modelResp.message === "string") content = modelResp.message;
 
     const urls = normalizeGeneratedAssetUrls(modelResp.generatedImageUrls);
-    for (const u of urls) {
-      const imgPath = encodeAssetPath(u);
-      const imgUrl = toImgProxyUrl(global, origin, imgPath);
-      content += `\n${imgUrl}`;
-      // 预热缓存：主动访问图片URL触发缓存写入
-      warmupCache(imgUrl, opts.cookie).catch(() => {});
+    if (urls.length) {
+      for (const u of urls) {
+        const imgPath = encodeAssetPath(u);
+        const imgUrl = toImgProxyUrl(global, origin, imgPath);
+        content += `\n${imgUrl}`;
+        // 预热缓存：主动访问图片URL触发缓存写入
+        warmupCache(imgUrl, opts.cookie).catch(() => {});
+      }
+      break;
     }
+
+    // If upstream emits placeholder/empty generatedImageUrls in intermediate frames, keep scanning.
+    if (Array.isArray(modelResp.generatedImageUrls)) continue;
+
+    // For normal chat replies, the first modelResponse is enough.
     break;
   }
 
